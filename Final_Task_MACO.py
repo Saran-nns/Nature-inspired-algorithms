@@ -1,0 +1,730 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Jan 25 13:45:02 2018
+
+@author: Till
+"""
+
+"""
+Created on Fri Nov 29 12:33:10 2017
+@author: Yannic Jänike
+"""
+
+import numpy as np
+import random
+import time
+import itertools
+
+class antColony():
+    class ant():
+
+        def __init__(self,init_location,possible_locations,pheromone_map,alpha,beta,vehicleType, truck_cost,first_pass):
+            """
+            Initialite an ant with,
+
+            init_location(int) : initial position of the ant
+            possible_locations(List) : List of all possible possible_locations
+            path_cost(int) : Cost of the path the ant has traversed,
+            pheromone_map(List) : List of List, where pheromone_map[i][j] represents row i at column j
+            Alpha(float) : determines impact of the pheromone_map in the path selection
+            Beta(float ) : determines impact of the distance between node i and i+1 in the path selection
+            first_pass(boolean) : determines if we are in the first iteration or not
+            """
+            self.init_location = init_location
+            self.possible_locations = possible_locations
+            self.path = []
+            self.path_cost = 0
+            self.current_location = init_location
+            self.pheromone_map = pheromone_map
+            self.alpha = alpha
+            self.beta = beta
+            self.first_pass = True
+            self.capacity = self.getCapacity(vehicleType)#load
+            self.delivered = 0
+            self.demand = np.copy(demand)
+            self.truck_cost = truck_cost
+
+
+            self.update_path(init_location)
+
+#---------------------------------------------SOLUTION CONSTRUCTION--------------------------------------#
+        def getCapacity(self,vehicleType):
+
+            return truck_types[int(vehicleType)]
+
+
+        def create_path(self):
+            """
+            Create a path for the ant self
+            """
+            #as long as the list of Possible locations is not empty, we search for the next node
+            while self.possible_locations:
+
+                if sum(self.demand) <= 0:
+                    self.traverse_to_end(self.current_location)
+                    break
+
+                elif self.capacity == self.delivered:
+                    self.traverse_to_end(self.current_location)
+                    break
+                else:
+                    next = self.pick_path()
+                    if self.demand[next-1] != 0:
+                        self.traverse(self.current_location,next)
+
+        def pick_path(self):
+            """
+            Pick a path from self.possible_locations and return it
+            """
+            global distance
+
+
+            #if we are in the first iteration, just take a random path
+            if self.first_pass:
+                self.first_pass = False
+                return random.choice(self.possible_locations)
+
+
+            #else compute the path by the ACO edge selection Heuristic
+            #(pheromoneamount^alpha * (1/distance)^beta)/sum(all alowed moves)
+            #attractiveness is the list of numerators computed by the numerator of the formula above
+            attractiveness = []
+            #denominator has to be computed
+            denominator  = 0.0
+
+            #for every location in the possible location, compute the likeliehood
+            for possbible_next_location in self.possible_locations:
+                #safe the values for the computation
+                pheromone_amount = float(self.pheromone_map[self.current_location][possbible_next_location])
+                dist = float(distance[self.current_location][possbible_next_location])
+
+                #if (self.alpha == 0) and (self.beta == 0):
+                #attractiveness.append(pheromone_amount*(1/distance))
+                #append the numerator list 'attractiveness' with the numerator of the likelyhood
+                if dist == 0:
+                    attractiveness.append(0)
+                else:
+                    attractiveness.append(pow(pheromone_amount, self.alpha)*(1/dist))
+            #Compute the denominator by adding up all possible attractivnesses
+            denominator = float(sum(attractiveness))
+
+            #we have to avoid zero devisions, so we compute the smallest number not zero, if the denominator is 0
+            if denominator == 0.0:
+                def next_up(x):
+                    import math
+                    import struct
+                    # NaNs and positive infinity map to themselves.
+                    if math.isnan(x) or (math.isinf(x) and x > 0):
+                        return x
+
+                    # 0.0 and -0.0 both map to the smallest +ve float.
+                    if x == 0.0:
+                        x = 0.0
+
+                        n = struct.unpack('<q', struct.pack('<d', x))[0]
+
+                        if n >= 0:
+                            n += 1
+                        else:
+                            n -= 1
+                    return struct.unpack('<d', struct.pack('<q', n))[0]
+
+                for i in attractiveness:
+                    attractiveness[i] = next_up(attractiveness[i])
+                denominator = next_up(denominator)
+
+            #fill the path Probability list with the computed likeliehoods
+            pathProbabilities = []
+            for i in range(len(self.possible_locations)):
+                if denominator != 0.0:
+                    pathProbabilities.append(attractiveness[i]/denominator)
+                elif denominator == 0.0:
+                    pathProbabilities.append(0)
+
+            #Sample the next path from the probabilities
+            toss = random.random()
+            cummulative = 0
+
+            for i in range(len(pathProbabilities)):
+                if toss <= (pathProbabilities[i] + cummulative):
+                    next_city = self.possible_locations[i]
+                    return next_city
+                cummulative += pathProbabilities[i]
+
+
+
+        def traverse_to_end(self,oldCity):
+            """
+            travel from the old node to the new node and update the ant parameters
+            oldCity(int) : the current locations
+            newCity(int) : the City we choose to visit next
+            """
+            self.path.append(0)
+            self.update_demand(0)
+
+            self.update_pathCost(oldCity,0)
+            self.current_location = 0
+
+        def traverse(self,oldCity,newCity):
+            """
+            travel from the old node to the new node and update the ant parameters
+            oldCity(int) : the current locations
+            newCity(int) : the City we choose to visit next
+            """
+            self.update_demand(newCity)
+            self.update_path(newCity)
+
+            self.update_pathCost(oldCity,newCity)
+            self.current_location = newCity
+
+        def update_demand(self,newCity):
+            #print("Demand:", self.demand[newCity-1])
+            #print("Current Capacity: ", self.capacity-self.delivered)
+
+
+            delivered_to_city = min(self.demand[newCity-1],(self.capacity-self.delivered))
+
+            #print("Delivered:", delivered_to_city)
+            #print("")
+
+            self.demand[newCity-1] -= delivered_to_city
+            self.delivered += delivered_to_city
+
+
+        def update_path(self,newCity):
+            """
+            add the new city to the path and remove it from the possible_locations list
+            """
+            self.path.append(newCity)
+
+            '''
+            delivered_to_city = min(self.demand[newCity-1],(self.capacity-self.delivered))
+            self.demand[newCity-1]
+            '''
+
+            if self.demand[newCity-1] == 0:
+                self.possible_locations.remove(newCity)
+
+        def update_pathCost(self,oldCity,newCity):
+            """
+            add the cost of the path to the new node to the total path_cost
+            """
+            new_cost = self.truck_cost * distance[oldCity][newCity]
+            self.path_cost += new_cost
+
+    def __init__(self, start, ant_count, alpha, beta,  pheromone_evaporation_coefficient, pheromone_constant, iterations, vehicle_type, truck_cost, usedNodes):
+        """
+        initialize an ant Colony
+        start(int) = the starting position of the
+        ant_cont(int) = number of the ants in the colony
+        Alpha(float) : determines impact of the pheromone_map in the path selection
+        Beta(float ) : determines impact of the distance between node i and i+1 in the path selection
+        pheromone_evaporation_coefficient(float) : how much pheromone evaporates in one iteration
+        pheromone_constant(float) : Parameter to regulate the amount of pheromone that is added to the pheromone_map
+        iterations(int) : numebr of iterations we run through
+        """
+
+        # Matrix of the pheromone amount over iterations
+        self.pheromone_map = self.init_pheromone_map(len(distance))
+        # Matrix of pheromone amount in iteration
+        self.pheromone_map_iteration = self.init_pheromone_map(len(distance))
+
+        #start node is set to city 0
+        if start is None:
+            self.start = 0
+        else:
+            self.start = start
+
+
+        #ant_count
+        if type(ant_count) is not int:
+            raise TypeError("ant_count must be int")
+        if ant_count < 1:
+            raise ValueError("ant_count must be >= 1")
+
+        self.ant_count = ant_count
+
+
+        #alpha
+        if (type(alpha) is not int) and type(alpha) is not float:
+            raise TypeError("alpha must be int or float")
+
+        if alpha < 0:
+            raise ValueError("alpha must be >= 0")
+
+        self.alpha = float(alpha)
+
+        #beta
+        if (type(beta) is not int) and type(beta) is not float:
+            raise TypeError("beta must be int or float")
+
+        if beta < 0:
+            raise ValueError("beta must be >= 0")
+
+        self.beta = float(beta)
+
+        #pheromone_evaporation_coefficient
+        if (type(pheromone_evaporation_coefficient) is not int) and type(pheromone_evaporation_coefficient) is not float:
+            raise TypeError("pheromone_evaporation_coefficient must be int or float")
+
+        self.pheromone_evaporation_coefficient = float(pheromone_evaporation_coefficient)
+
+        #pheromone_constant
+        if (type(pheromone_constant) is not int) and type(pheromone_constant) is not float:
+            raise TypeError("pheromone_constant must be int or float")
+
+        self.pheromone_constant = float(pheromone_constant)
+
+        #iterations
+        if (type(iterations) is not int):
+            raise TypeError("iterations must be int")
+
+        if iterations < 0:
+            raise ValueError("iterations must be >= 0")
+
+        self.iterations = iterations
+
+
+        self.vehicleType = vehicle_type
+
+        self.truck_cost = truck_cost
+
+
+        self.used_nodes = []
+        for node in usedNodes:
+            self.used_nodes.append(node)
+
+        self. delivered = 0
+        #other initial variables
+        self.first_pass = True
+        #add ants to the colony
+        self.colony = self.init_ants(self.start)
+        #sbest cost we have seen so far
+        self.shortest_distance = None
+        #shortest path we have seen so far
+        self.shortest_path_seen = None
+        #best ant in the iteration
+        self.shortest_ant_in_iteration = None
+        self.FirsAnt = True
+
+        self.bestDemandList = demand
+
+        self.best_ant = None
+
+
+    def possible_locations(self):
+        """
+        create a list of all possible locations
+        """
+        possible_locations = list(range(len(distance)-1))
+        """
+        #print(possible_locations)
+        print(possible_locations)
+        for i in range(len(self.used_nodes)-1):
+            print(self.used_nodes[i])
+            possible_locations.remove(self.used_nodes[i])
+        """
+        return possible_locations
+
+    def init_pheromone_map(self,value = 0.0):
+        """
+        create the pheromone map,
+        has to be the same size of the distance
+        """
+        size = len(distance)
+        p_map = []
+        for row in range(size):
+            p_map.append([float(value) for x in range(size)])
+        return p_map
+
+    def init_ants(self,start):
+        """
+        Create ants, if it is first called, else we just 'reset' the ants with the initial values
+        """
+
+        #If we are in the first iteration, initialize ants
+        if self.first_pass:
+            return [self.ant(start, self.possible_locations(), self.pheromone_map,
+                    self.alpha, self.beta, self.vehicleType, self.truck_cost, first_pass=True) for _ in range(self.ant_count)]
+        #else reset every ant in the colony
+        for ant in self.colony:
+            ant.__init__(start,self.possible_locations(),self.pheromone_map,self.alpha,self.beta,self.vehicleType, self.truck_cost, self.first_pass)
+
+
+#---------------------------------- EVAPORATION and INTENSIFICATION--------------------------------#
+    def update_pheromone_map(self):
+        """
+        update the pheromone_map according to the formula
+        (1-pheromone_evap_constant)*(pheromoneampunt at position i,j) + sum(pheromoneConstant/length of ant_k  if an ant traveld the edge, 0 otherwise)
+        """
+
+        pheromone_factor = 1 - self.pheromone_evaporation_coefficient
+
+        #EVAPORATION update every entry in the pheromone_map
+        for i in range(len(self.pheromone_map)):
+            for j in range(len(self.pheromone_map)):
+                if i != j:
+                    self.pheromone_map[i][j] = self.pheromone_map[i][j] * pheromone_factor
+                #if i=j we set the value to zero, because we dont want
+                else:
+                    self.pheromone_map[i][j] = 0
+        #Intensification
+                #add the new pheromone values from the current iteration to the old pheromone_map
+                self.pheromone_map[i][j] += self.pheromone_map_iteration[i][j]
+
+    def update_pheromone_map_iteration(self,ant):
+        """
+        update the pharomone_map_iteration with the computed pheromone values
+        sum(pheromoneConstant/length of ant_k  if an ant traveld the edge, 0 otherwise)
+        where ant_k it the ant we passed
+        """
+        path = ant.path
+
+        #iterate through the path of the ant and update the pheromone_map_iteration at each respective edge the ant has traveled
+        for i in range(len(path)-1):
+            current_pheromone_value = float(self.pheromone_map_iteration[path[i]][path[i + 1]])
+
+            new_pheromone_amount = self.pheromone_constant/ant.path_cost
+
+            #because the map is symetrical to the diagonal we only need to copy them with respect to the indizes
+            self.pheromone_map_iteration[path[i]][path[i + 1]] = current_pheromone_value + new_pheromone_amount
+            self.pheromone_map_iteration[path[i + 1]][path[i]] = current_pheromone_value + new_pheromone_amount
+
+#---------------------------------- EVAPORATION and INTENSIFICATION ENDS--------------------------------#
+    def mainloop(self):
+        """
+        mainloop which loops through the differnet steps:
+        for ant k ∈ {1,...,m}
+             construct a solution {solution finding}
+        endfor
+        forall pheromone values do
+            decrease the value by a certain percentage {evaporation}
+        endfor
+        forall pheromone values corresponding to good solutions
+        do
+            increase the value {intensification}
+        endfor
+        """
+        terminate = 0
+
+        #Plotting Lists
+        iteration_results = []
+        iteration = []
+        shortest_in_iteration = []
+
+        while terminate < self.iterations:
+            terminate += 1
+            #SOLUTION FINDING
+            for ant in self.colony:
+                ant.create_path()
+
+            #COMPUTE INTENSIFICATION VALUES
+            for ant in self.colony:
+                self.update_pheromone_map_iteration(ant)
+
+                #set best path to an initial value
+                if self.FirsAnt:
+                    self.shortest_ant_in_iteration = ant.path_cost
+                    self.FirsAnt = False
+
+                if not self.shortest_distance:
+                    self.shortest_distance = ant.path_cost
+                if not self.shortest_path_seen:
+                    self.shortest_path_seen = ant.path_cost
+
+                #find the best path in all the ants in the iteration
+                if ant.path_cost < self.shortest_ant_in_iteration:
+                    self.shortest_ant_in_iteration = ant.path_cost
+                #find overall best path
+                if ant.path_cost < self.shortest_distance:
+                    #fill Iteartion List for Plot
+                    iteration_results.append(ant.path_cost)
+                    iteration.append(len(shortest_in_iteration))
+
+                    terminate = 0
+
+                    self.delivered = ant.delivered
+
+                    self.shortest_distance = ant.path_cost
+                    self.shortest_path_seen = ant.path
+                    self.bestDemandList = ant.demand
+                    #print("#-------------------# Shortest Path : ", ant.path_cost,"   #------#")
+
+            #print("Shortest Path: ", self.shortest_ant_in_iteration,"     Iterations left: ",self.iterations - terminate )
+            #save shortest ant in iteration for plot
+            shortest_in_iteration.append(self.shortest_ant_in_iteration)
+            #restet FirstAnt for next iteration
+            self.FirsAnt = True
+            #EVAPORATION and INTENSIFCATION
+            self.update_pheromone_map()
+
+            if self.first_pass:
+                self.first_pass = False
+
+            #Reset the ants in the colony
+            self.init_ants(self.start)
+
+            #reset the pheromone_map_iteration matrix
+            self.pheromone_map_iteration = self.init_pheromone_map()
+
+        #return the shortest distance and the path of the Shortest distance
+        return self.shortest_path_seen, self.shortest_distance, self.delivered
+#---------------------------------------- CLASSES END --------------------------------------#
+
+
+
+#-------------------------------------------------------FCHC-------------------------------
+
+def CurrentSolution(CurrentState):
+    
+    """ Estimate the customer_demand and value of current solution.
+        
+        Args:
+            CurrentState(list) - List of count of vehicle types used
+            Capacity(list) - List of available vehicles types (capacity) 
+            
+        Returns:
+            CurrentState(list) - List of counts that corresponds to count of vehicle types used
+            DemandMet(int) - Sum(VehiclesCapacity) which should be >= Total CustomerDemand
+                  
+    """     
+    VehiclesCapacity = [VehicleCount*Capacity for VehicleCount,Capacity in zip(CurrentState,Capacity)]
+    
+    DemandMet = sum(VehiclesCapacity)   
+       
+    return CurrentState,DemandMet 
+
+
+def GenerateNeighbor(CurrentState):
+    """ Generate neighbors for current solution.
+    
+        Args:
+            CurrentState(list) - List of counts that corresponds to count of an item in the Sack
+    
+        Returns:
+            Neighbor(list) - Neighbour(list)   
+    """
+    NewState = CurrentState.copy() 
+    NewState[random.randint(0,len(CurrentState)-1)] += StepSize  # Generate the neighbor randomly
+    
+    return NewState
+
+def EvaluateNeighbor(Neighbor):
+    
+    """ Evauate the Neighbor of CurrentSolution 
+        
+        Args:
+            Neighbor(list) - List of count of vehicle types used
+            Capacity(list) - List of available vehicles types (capacity) 
+            
+        Returns:
+            CurrentState(list) - List of counts that corresponds to count of vehicle types used
+            DemandMet(int) - Sum(VehiclesCapacity) which should be >= Total CustomerDemand     
+    """    
+    NeighborVehiclesCapacity = [VehicleCount*Capacity for VehicleCount,Capacity in zip(Neighbor,Capacity)]
+    
+    NeighborDemandMet = sum(NeighborVehiclesCapacity)  
+       
+    return Neighbor, NeighborDemandMet
+
+def getVehicle():
+
+    # Read txt files
+    ReadCapacityFile = np.loadtxt("capacity.txt")
+    ReadCustomerDemandFile = np.loadtxt("demand.txt")
+
+    #Initialize global variables of the problem.
+
+    global Capacity
+    global CustomerDemand
+    print('------------Selecting Vehicles-----------------')
+    Capacity = np.unique(ReadCapacityFile.astype(int))
+    # Capacity = [10,100,200,600]
+    NumberOfVehicles = len(Capacity)
+    CustomerDemand = np.sum(ReadCustomerDemandFile.astype(int))
+    print(CustomerDemand,Capacity)
+    
+
+    # FCHC Hyperparameter
+    global StepSize
+    StepSize = 1        
+
+    #Ground /Initial state of Hill Climber
+    CurrentState = [0]* NumberOfVehicles    
+
+    # CurrentState initialized with random values
+    #CurrentState = [random.randint(0,NumberOfItems) for item in range(NumberOfItems)]
+    print("Initial Current State",CurrentState)
+    CurrentState, CurrentDemandMet = CurrentSolution(CurrentState) 
+
+    #Loop until optimal solution is met
+
+    iterations = 0
+    StartTime = time.time()
+    while True:
+
+        NewNeighbor = GenerateNeighbor(CurrentState)
+    
+        Neighbor,NeighborDemandMet = EvaluateNeighbor(NewNeighbor)
+
+        
+        if NeighborDemandMet < CustomerDemand+Capacity[0] :
+        
+            CurrentState = Neighbor.copy()
+            CurrentDemandMet = NeighborDemandMet
+            iterations+=1
+            print(CurrentState,CurrentDemandMet)   
+            print("--- %s seconds ---" % (time.time() - StartTime))
+            print("Best Solution is %s with Demand Met %s " %(CurrentState, CurrentDemandMet))
+            print("Number of Iterations", iterations)
+
+            if NeighborDemandMet >= CustomerDemand:
+               break
+
+    VehicleTypeList = []
+    for vehicletype,count in enumerate(CurrentState):
+        VehicleTypeList.append(np.ndarray.tolist((np.repeat(vehicletype,count)))) 
+
+    VehicleList = list(itertools.chain.from_iterable(VehicleTypeList))
+    print('---------- Vehicles list is ready-------------')
+    return CurrentState, VehicleList
+
+
+
+#--------------------------------------------------------FCHC ENDS-----------------------------------------------------------
+
+
+def MACO():
+    global transportation_cost
+    global demand
+    global capacity
+    global distance
+    global truck_types
+
+    transportation_cost, distance, demand, capacity = read_files()
+
+    truck_types = np.unique(capacity)
+    print(truck_types)
+    truck_cost = np.unique(transportation_cost)
+
+
+    _,vehicle_list = getVehicle()
+    print("vehicle_list",vehicle_list)
+
+    #Store each antColony("Vehicle") in the List("Garage")
+    Garage = []
+    TotalCost = 0
+
+    usedNodes = []
+    for i in range(len(vehicle_list)):
+
+        print("#-------------------------------------------------------------------------#")
+        print("#                Vehicle Number {} of {}             ".format(i+1,len(vehicle_list)))
+        print("#                Vehicle Capacity   {}             ".format(truck_types[vehicle_list[i]]))
+        print("#                Vehicle List {}             ".format(vehicle_list))
+        print("#-------------------------------------------------------------------------#")
+
+
+        vehicle = antColony(None, antnmbr, al, be,  p_evap_co, p_factor, iterations, vehicle_list[i], truck_cost[vehicle_list[i]], usedNodes)
+
+        shortest_path, shortest_path_cost, delivered = vehicle.mainloop()
+
+        if shortest_path:
+            for node in shortest_path:
+                usedNodes.append(node)
+
+
+        print(shortest_path)
+        print("")
+
+        update_lists(vehicle,shortest_path)
+
+        print(demand)
+        print("")
+
+        Garage.append(vehicle)
+
+        TotalCost += shortest_path_cost
+        print("\no Total Cost: {}      \no This vehicle: {}\no Delivered: {}\n".format(TotalCost,shortest_path_cost, delivered))
+        #print("Demand: ",demand)
+
+    print("#---------------------------------------------------------------------#")
+    print("                              OVERVIEW")
+    print("#---------------------------------------------------------------------#")
+    for i in range(len(Garage)):
+        print()
+        print("Vehicle: {} | Type: {} | Capacity: {}".format(i, vehicle_list[i],truck_types[vehicle_list[i]] ))
+        print("   o Path: {}".format(Garage[i].shortest_path_seen))
+        print("   o Cost: {}".format(Garage[i].shortest_distance))
+
+
+
+    print("\nDemand: ",sum(demand))
+    print("Total Cost: ",TotalCost,"\n")
+
+    if sum(demand) != 0:
+        print("Damand not 0!")
+    print("")
+    print("#---------------------------------------------------------------------#")
+    print("                              DONE")
+    print("#---------------------------------------------------------------------#")
+
+
+def update_lists(vehicle,shortest_path):
+    """
+    Updates the demand and available_positions matrix for the shortest path
+    """
+    global demand
+    #print(vehicle.bestDemandList
+    demand = np.copy(vehicle.bestDemandList)
+    print("Demand left: ",sum(demand))
+
+def read_files():
+    """
+    This function reads in the tsp files and converts them into int matrices. The matrix can be accessed globably with the variable name tspmat
+    """
+    print("#Read Files")
+    #Distance values
+    distance = np.loadtxt("distance.txt")
+
+    transportation_cost = np.loadtxt("transportation_cost.txt")
+
+    demand = np.loadtxt("demand.txt")
+
+    capacity = np.loadtxt("capacity.txt")
+
+
+
+
+    #cast as integers values
+    distance = distance.astype(int)
+    transportation_cost = transportation_cost.astype(int)
+    demand = demand.astype(int)
+    capacity = capacity.astype(int)
+
+
+    return transportation_cost, distance, demand, capacity
+
+
+def init():
+    global antnmbr
+    global p_evap_co
+    global p_factor
+    global al
+    global be
+    global iterations
+    global default
+
+    benchmark = 1
+    antnmbr = 50
+    p_evap_co = 0.4
+    p_factor = 0.4
+    al = 1
+    be = 1
+    iterations = 30
+
+    MACO()
+
+
+
+init()
