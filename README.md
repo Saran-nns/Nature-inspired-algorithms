@@ -1,2 +1,2 @@
 # Nature-inspired-algorithms
-Few interesting optimization tasks inpired by algorithms found in nature!
+Few interesting optimization tasks solved by algorithms found in nature!
